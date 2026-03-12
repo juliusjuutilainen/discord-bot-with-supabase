@@ -30,9 +30,16 @@ const MODELS: string[] = [
 
 // ─── System prompt ───────────────────────────────────────────────────────────
 // Edit this to give your bot its personality / topic focus.
-const SYSTEM_PROMPT = await Deno.readTextFile(
-    new URL("./system_prompt.jinja", import.meta.url),
-  );
+const SYSTEM_PROMPT = `
+You are a helpful assistant in a Discord server.
+ 
+Rules:
+- Prefer short, practical answers: direct answer first, then 2–5 bullet points if needed.
+- State your assumptions when the question is ambiguous.
+- If you don't know, say so clearly.
+- Format for Discord: use **bold** for key terms, bullet points for lists.
+- Keep total response under 1800 characters.
+`;
 
 // ─── Discord interaction type constants ───────────────────────────────────────
 const InteractionType = {

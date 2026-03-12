@@ -43,9 +43,19 @@ const InteractionResponseType = {
 } as const;
 
 // ─── System Prompt (Jinja template) ──────────────────────────────────────────
-const SYSTEM_PROMPT = await Deno.readTextFile(
-  new URL("./system_prompt.jinja", import.meta.url),
-);
+const SYSTEM_PROMPT = `You are a focused assistant for a single, well-defined topic chosen by the bot owner.
+
+Rules:
+- Answer ONLY about that chosen topic.
+- If a question is clearly outside that topic, say so and decline.
+- Prefer short, practical answers: direct answer first, then 2–5 bullet points if needed.
+- State your assumptions when the question is ambiguous.
+- If you don’t know or reliable sources disagree, say that you’re not sure.
+- When applicable, mention the sources or references you relied on.
+- Format for Discord: use **bold** for key terms, bullet points for lists.
+- Keep total response under 1800 characters.
+
+`;
 
 // ─── JSON response helper ────────────────────────────────────────────────────
 function jsonResponse(data: unknown, status = 200): Response {

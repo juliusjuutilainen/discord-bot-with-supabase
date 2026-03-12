@@ -22,10 +22,10 @@ const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 // Full list: https://openrouter.ai/models?q=free
 // Models with ":free" suffix are always free. Add/remove as needed.
 const MODELS: string[] = [
-  "google/gemini-2.0-flash-exp:free",
-  "meta-llama/llama-4-maverick:free",
-  "deepseek/deepseek-chat-v3-0324:free",
-  "mistralai/mistral-7b-instruct:free",
+  "openrouter/hunter-alpha",
+  "nvidia/nemotron-3-super-120b-a12b:free",
+  "qwen/qwen3-next-80b-a3b-instruct:free",
+  "z-ai/glm-4.5-air:free",
 ];
 
 // ─── System prompt ───────────────────────────────────────────────────────────
@@ -151,25 +151,24 @@ async function callOpenRouterModel(
   return { text, model };
 }
 
-// ─── OpenRouter: try models in order, fallback on failure ────────────────────
+// ─── OpenRouter: pick a random model, fallback to others on failure ──────────
 async function askOpenRouter(question: string): Promise<OpenRouterResult> {
-  let lastError: Error | null = null;
-
-  for (const model of MODELS) {
-    try {
-      const result = await callOpenRouterModel(question, model);
-      if (model !== MODELS[0]) {
-        console.log(`Fallback succeeded with ${model}`);
+    // Shuffle a copy so we try all models before giving up, but start randomly
+    const shuffled = [...MODELS].sort(() => Math.random() - 0.5);
+    let lastError: Error | null = null;
+   
+    for (const model of shuffled) {
+      try {
+        const result = await callOpenRouterModel(question, model);
+        return result;
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        console.warn(`Model ${model} failed, trying next...`);
       }
-      return result;
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-      console.warn(`Model ${model} failed, trying next...`);
     }
+   
+    throw lastError ?? new Error("All OpenRouter models failed");
   }
-
-  throw lastError ?? new Error("All OpenRouter models failed");
-}
 
 // ─── Discord: edit the deferred response ─────────────────────────────────────
 async function editOriginalResponse(

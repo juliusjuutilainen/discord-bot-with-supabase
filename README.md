@@ -115,7 +115,7 @@ supabase secrets set \
 You can do this in supabase console as well, in the section for edge functions.
 ---
 
-## Step 4 — Deploy the Edge Function
+## Step 4 — Deploy the Edge Functions
 
 ### Link your local project
 
@@ -130,7 +130,8 @@ supabase link --project-ref YOUR_PROJECT_REF
 ### Deploy
 
 ```bash
-supabase functions deploy discord-bot --no-verify-jwt
+supabase functions deploy discord-interactions --no-verify-jwt
+supabase functions deploy grounded-llm-inference --no-verify-jwt
 ```
 
 The `--no-verify-jwt` flag is required because Discord sends raw HTTP requests — not Supabase auth tokens.
@@ -138,7 +139,7 @@ The `--no-verify-jwt` flag is required because Discord sends raw HTTP requests �
 After deploying, your function URL will be:
 
 ```
-https://YOUR_PROJECT_REF.supabase.co/functions/v1/discord-bot
+https://YOUR_PROJECT_REF.supabase.co/functions/v1/grounded-llm-inference
 ```
 NOTE: YOU NEED TO DO IT THIS WAY. CREATING A FUNCTION IN SUPABASE CONSOLE WILL ENFOCE JWT AND CAUSE A PERMANENT 401 CODE ON THE FUNCTION FROM CALLS FROM DISCORD.
 ---
@@ -177,9 +178,9 @@ You should get a JSON response with the command details. Global commands can tak
 1. Go back to the [Discord Developer Portal](https://discord.com/developers/applications)
 2. Select your application
 3. On the **General Information** page, find **Interactions Endpoint URL**
-4. Enter your Edge Function URL **with the anon key as a query parameter**:
+4. Enter your `discord-interactions` Edge Function URL **with the anon key as a query parameter**:
    ```
-   https://YOUR_PROJECT_REF.supabase.co/functions/v1/discord-bot?apikey=YOUR_SUPABASE_ANON_KEY
+   https://YOUR_PROJECT_REF.supabase.co/functions/v1/discord-interactions?apikey=YOUR_SUPABASE_ANON_KEY
    ```
    > **Why the `apikey`?** Even with `--no-verify-jwt`, Supabase's API gateway still
    > requires an API key to route the request. Discord sends plain POST requests with
@@ -221,7 +222,7 @@ Go to your Discord server and try (assuming you named your command `ask`):
 ```
 supabase/
   functions/
-    discord-bot/            ← Supabase Edge Function
+    grounded-llm-inference/            ← Supabase Edge Function
       index.ts              ← main handler & logic
       system_prompt.jinja   ← Jinja template for Gemini system prompt
   migrations/
@@ -235,12 +236,12 @@ README.md
 
 The bot’s behavior is driven by a **Jinja-formatted system prompt** used by Gemini.
 
-- **Template file**: `supabase/functions/discord-bot/system_prompt.jinja`
+- **Template file**: `supabase/functions/grounded-llm-inference/system_prompt.jinja`
 - **Format**: Plain text with optional Jinja-style placeholders (e.g. `{{ variable }}`) if you later decide to introduce dynamic values
 - **Deployment**: Any changes to the template require a function redeploy:
 
 ```bash
-supabase functions deploy discord-bot --no-verify-jwt
+supabase functions deploy grounded-llm-inference --no-verify-jwt
 ```
 
 You can safely tweak tone, rules, and formatting in `system_prompt.jinja` without touching TypeScript code, as long as the overall instructions stay within Discord’s message length limits.
@@ -286,7 +287,7 @@ You can safely tweak tone, rules, and formatting in `system_prompt.jinja` withou
 |---------|-----|
 | Discord says "Interactions Endpoint URL is invalid" | Check that the function is deployed with `--no-verify-jwt` and `discord_public_key` is correct |
 | Bot responds with "Please provide a question!" | Make sure you're using the `question:` option — type `/tbc` and wait for the autocomplete |
-| Bot says "Something went wrong" | Check Edge Function logs: `supabase functions logs discord-bot` — likely a bad `gemini_api_key` |
+| Bot says "Something went wrong" | Check Edge Function logs: `supabase functions logs grounded-llm-inference` — likely a bad `gemini_api_key` |
 | Slash command doesn't appear in Discord | Global commands take up to an hour. Use a guild command for instant testing |
 | Cache never hits | Check that the `query_cache` table exists and RLS is disabled (or you're using the service role key) |
 

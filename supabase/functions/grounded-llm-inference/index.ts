@@ -1,8 +1,9 @@
+// NOTE: This was created to get WoW TBC related info from the web into discord chat. You can use it for ANY searching but outside that it's not very useful.
+// The same pattern should be OK for any LLM inference though. You might want to remove the caching part.
+
 import { createClient } from "npm:@supabase/supabase-js@2";
-import nacl from "npm:tweetnacl@1.0.3";
 
 // ─── Environment ─────────────────────────────────────────────────────────────
-const DISCORD_PUBLIC_KEY = Deno.env.get("discord_public_key")!;
 const DISCORD_APP_ID = Deno.env.get("discord_application_id")!;
 const GEMINI_API_KEY = Deno.env.get("gemini_api_key")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -32,7 +33,6 @@ const MODELS: ModelConfig[] = [
 
 // ─── Discord Types ───────────────────────────────────────────────────────────
 const InteractionType = {
-  PING: 1,
   APPLICATION_COMMAND: 2,
 } as const;
 
@@ -46,33 +46,6 @@ const InteractionResponseType = {
 const SYSTEM_PROMPT = await Deno.readTextFile(
   new URL("./system_prompt.jinja", import.meta.url),
 );
-
-// ─── Hex helpers ─────────────────────────────────────────────────────────────
-function hexToUint8Array(hex: string): Uint8Array {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < hex.length; i += 2) {
-    bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
-  }
-  return bytes;
-}
-
-// ─── Discord signature verification ──────────────────────────────────────────
-function verifySignature(
-  body: string,
-  signature: string | null,
-  timestamp: string | null,
-): boolean {
-  if (!signature || !timestamp) return false;
-  try {
-    return nacl.sign.detached.verify(
-      new TextEncoder().encode(timestamp + body),
-      hexToUint8Array(signature),
-      hexToUint8Array(DISCORD_PUBLIC_KEY),
-    );
-  } catch {
-    return false;
-  }
-}
 
 // ─── JSON response helper ────────────────────────────────────────────────────
 function jsonResponse(data: unknown, status = 200): Response {
@@ -282,26 +255,9 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: "Method not allowed" }, 405);
   }
 
-  const body = await req.text();
+  const interaction = await req.json();
 
-  // Verify Discord signature
-  const isValid = verifySignature(
-    body,
-    req.headers.get("x-signature-ed25519"),
-    req.headers.get("x-signature-timestamp"),
-  );
-  if (!isValid) {
-    return jsonResponse({ error: "Invalid signature" }, 401);
-  }
-
-  const interaction = JSON.parse(body);
-
-  // ── PING (Discord endpoint verification) ──
-  if (interaction.type === InteractionType.PING) {
-    return jsonResponse({ type: InteractionResponseType.PONG });
-  }
-
-  // ── APPLICATION_COMMAND ──
+  // ── APPLICATION_COMMAND (/ask) ──
   if (interaction.type === InteractionType.APPLICATION_COMMAND) {
     const options = interaction.data?.options ?? [];
     const questionOpt = options.find(

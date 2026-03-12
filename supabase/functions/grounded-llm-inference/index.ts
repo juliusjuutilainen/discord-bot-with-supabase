@@ -29,14 +29,11 @@ interface ModelConfig {
 }
 
 const MODELS: ModelConfig[] = [
-  // Tier 1 — paid but capable
-  { model: "google/gemini-2.5-flash", tier: 1 },
-  { model: "meta-llama/llama-4-maverick", tier: 1 },
   // Tier 2 — free fallbacks
-  { model: "google/gemini-2.0-flash-exp:free", tier: 2 },
-  { model: "meta-llama/llama-4-maverick:free", tier: 2 },
-  { model: "deepseek/deepseek-chat-v3-0324:free", tier: 2 },
-  { model: "mistralai/mistral-7b-instruct:free", tier: 2 },
+  { model: "openrouter/hunter-alpha", tier: 2 },
+  { model: "nvidia/nemotron-3-super-120b-a12b:free", tier: 2 },
+  { model: "qwen/qwen3-next-80b-a3b-instruct:free", tier: 2 },
+  { model: "z-ai/glm-4.5-air:free", tier: 2 },
 ];
 
 // ─── Discord Types ────────────────────────────────────────────────────────────

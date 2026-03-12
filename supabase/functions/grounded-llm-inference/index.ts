@@ -30,8 +30,8 @@ interface ModelConfig {
 
 const MODELS: ModelConfig[] = [
   // Tier 2 — free fallbacks
-  { model: "openrouter/hunter-alpha", tier: 2 },
   { model: "nvidia/nemotron-3-super-120b-a12b:free", tier: 2 },
+  { model: "openrouter/hunter-alpha", tier: 2 },
   { model: "qwen/qwen3-next-80b-a3b-instruct:free", tier: 2 },
   { model: "z-ai/glm-4.5-air:free", tier: 2 },
 ];

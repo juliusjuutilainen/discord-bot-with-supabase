@@ -18,3 +18,5 @@ create index if not exists idx_query_cache_expires
   on query_cache (expires_at);
 
 alter table query_cache enable row level security;
+
+CREATE POLICY "Allow all for service role" ON query_cache FOR ALL USING (true) WITH CHECK (true);

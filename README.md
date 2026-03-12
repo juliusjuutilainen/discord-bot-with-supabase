@@ -12,27 +12,22 @@ Originally built to answer WoW TBC questions in a Discord channel, but the patte
 ## Architecture
 
 ```
-User runs /ask in Discord
+User types /ask in Discord
         │
         ▼
-Discord sends HTTP POST ──▶ discord-interactions (Edge Function)
-                                    │
-                            Routes to handler function
-                                    │
-                            ┌───────┴───────┐
-                            │  Cache hit?   │
-                            └───┬───────┬───┘
-                              yes       no
-                               │         │
-                               │    LLM inference
-                               │    (Gemini / OpenRouter)
-                               │         │
-                               │    Save to cache
-                               │         │
-                               └────┬────┘
-                                    │
-                                    ▼
-                            Discord response
+Discord API
+        │  HTTP POST (slash command payload)
+        ▼
+discord-interactions  (Supabase Edge Function)
+        │  verify signature, route by command name
+        ▼
+Handler Edge Function  (grounded-llm-inference / openrouter-*)
+        │  call LLM, build response
+        ▼
+Discord API
+        │
+        ▼
+Answer appears in channel
 ```
 
 ---

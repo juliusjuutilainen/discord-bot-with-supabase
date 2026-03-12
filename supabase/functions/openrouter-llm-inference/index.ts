@@ -13,7 +13,6 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 // ─── Constants ───────────────────────────────────────────────────────────────
-const CACHE_TTL_HOURS = 168; // 7 days — set to 0 to disable caching
 const DISCORD_MAX_LENGTH = 2000;
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
@@ -65,54 +64,6 @@ function normalizeQuery(query: string): string {
     .trim()
     .replace(/[^\w\s]/g, "")
     .replace(/\s+/g, " ");
-}
-
-// ─── Cache: read ─────────────────────────────────────────────────────────────
-async function checkCache(normalized: string): Promise<string | null> {
-  if (CACHE_TTL_HOURS === 0) return null;
-
-  const { data, error } = await supabase
-    .from("query_cache")
-    .select("id, response_text, hit_count")
-    .eq("query_normalized", normalized)
-    .gt("expires_at", new Date().toISOString())
-    .limit(1)
-    .maybeSingle();
-
-  if (error || !data) return null;
-
-  supabase
-    .from("query_cache")
-    .update({ hit_count: (data.hit_count ?? 0) + 1 })
-    .eq("id", data.id)
-    .then();
-
-  return data.response_text;
-}
-
-// ─── Cache: write ─────────────────────────────────────────────────────────────
-async function saveCache(
-  original: string,
-  normalized: string,
-  responseText: string,
-): Promise<void> {
-  if (CACHE_TTL_HOURS === 0) return;
-
-  const expiresAt = new Date(
-    Date.now() + CACHE_TTL_HOURS * 60 * 60 * 1000,
-  ).toISOString();
-
-  await supabase.from("query_cache").upsert(
-    {
-      query_normalized: normalized,
-      query_original: original,
-      response_text: responseText,
-      expires_at: expiresAt,
-      // Note: intentionally not resetting hit_count on refresh
-      // — remove the field here if you want to preserve it on upsert
-    },
-    { onConflict: "query_normalized" },
-  );
 }
 
 // ─── OpenRouter: single model call ───────────────────────────────────────────
@@ -204,11 +155,6 @@ async function processQuery(
   const normalized = normalizeQuery(question);
 
   try {
-    const cached = await checkCache(normalized);
-    if (cached) {
-      await editOriginalResponse(interactionToken, cached);
-      return;
-    }
 
     const result = await askOpenRouter(question);
 
@@ -220,10 +166,6 @@ async function processQuery(
       answer = answer.substring(0, maxLen) + "\n\n*…truncated*";
     }
     answer += footer;
-
-    saveCache(question, normalized, answer).catch((e) =>
-      console.error("Cache save error:", e)
-    );
 
     await editOriginalResponse(interactionToken, answer);
   } catch (err) {
@@ -259,17 +201,6 @@ Deno.serve(async (req: Request) => {
         },
       });
     }
-
-    // Fast path: cache hit
-    const normalized = normalizeQuery(question);
-    const cached = await checkCache(normalized);
-    if (cached) {
-      return jsonResponse({
-        type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-        data: { content: cached },
-      });
-    }
-
     // Slow path: defer and process in background
     processQuery(question, interaction.token).catch(console.error);
 

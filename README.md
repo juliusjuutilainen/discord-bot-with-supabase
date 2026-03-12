@@ -1,25 +1,31 @@
-# Discord bot using supabase as a free hosting platform.
+# Discord Bot on Supabase — Free Hosting Template
 
-The purpose of this repo is to serve as a free-to-use POC on hosting Siscord bots on Supabase. Supabase is a postgres development platform, more here (github.com/supabase/supabase).
+A free-to-use proof-of-concept for hosting Discord bots on Supabase Edge Functions. The template covers three LLM inference backends, a shared query cache, and Discord slash command routing — all within Supabase's free tier.
 
-My template is for creating a simple bot that uses Gemini's generous free tier LLM inference to reference the web and answer a user question. Gemini API pricing guide (https://ai.google.dev/gemini-api/docs/pricing).
-But you could use this same guide for pretty much anything a discord bot would like to do, as long as it's within Supabase edge function runtime limits. In my case, I wanted a bot to answer WoW TBC related questions straight in channel. To the end user it's just a single HTTP endpoint that Discord calls when someone uses a slash command (for example, `/ask`).
+Originally built to answer WoW TBC questions in a Discord channel, but the pattern works for any topic you want to ground in web search. To the end user it's a single slash command (e.g. `/ask`).
 
-## Architecture for my usecase
+**Gemini API pricing:** https://ai.google.dev/gemini-api/docs/pricing  
+**Free OpenRouter models:** https://openrouter.ai/models?max_price=0
+
+---
+
+## Architecture
 
 ```
 User runs /ask in Discord
         │
         ▼
-Discord sends HTTP POST ──▶ Supabase Edge Function
+Discord sends HTTP POST ──▶ discord-interactions (Edge Function)
+                                    │
+                            Routes to handler function
                                     │
                             ┌───────┴───────┐
                             │  Cache hit?   │
                             └───┬───────┬───┘
                               yes       no
                                │         │
-                               │    Gemini 2.0 Flash (or your setup)
-                               │    (Google Search grounding)
+                               │    LLM inference
+                               │    (Gemini / OpenRouter)
                                │         │
                                │    Save to cache
                                │         │
@@ -29,23 +35,69 @@ Discord sends HTTP POST ──▶ Supabase Edge Function
                             Discord response
 ```
 
+---
+
+## Edge Functions
+
+| Function | Description |
+|----------|-------------|
+| `discord-interactions` | Entry point. Verifies Discord signature, routes slash commands to handler functions. |
+| `grounded-llm-inference` | Gemini 2.x with Google Search grounding + Supabase query cache. |
+| `openrouter-llm-inference` | OpenRouter free-tier models without caching. |
+| `openrouter-jina-inference` | OpenRouter free-tier models + Jina.ai web search grounding + Supabase query cache. |
+
+### Slash command routing
+
+Edit the `commandToFunction` map in `discord-interactions/index.ts` to add or remap commands:
+
+```typescript
+const commandToFunction: Record<string, string> = {
+  ask: "grounded-llm-inference",
+  openrouter: "openrouter-llm-inference",
+  // add more here
+};
+```
+
+---
+
+## Project Structure
+
+```
+supabase/
+  functions/
+    _shared/
+      discord.ts                        ← Ed25519 signature verification (shared)
+    discord-interactions/
+      index.ts                          ← Signature check + command router
+    grounded-llm-inference/
+      index.ts                          ← Gemini 2.x + Google Search grounding + cache
+    openrouter-llm-inference/
+      index.ts                          ← OpenRouter free models + cache
+    openrouter-jina-inference/
+      index.ts                          ← OpenRouter free models + Jina.ai grounding + cache
+  migrations/
+    20260311000000_create_query_cache.sql
+README.md
+```
+
+---
+
 ## Prerequisites
 
-You need accounts and API keys from three services. All have free tiers.
+All services have free tiers.
 
-| Service | What you need | Where to get it |
-|---------|--------------|-----------------|
+| Service | What you need | Where |
+|---------|--------------|-------|
 | **Discord** | Developer account | https://discord.com/developers |
-| **Supabase** | Project (free plan) | https://supabase.com |
-For AI
-| **Google AI** | Gemini API key | https://aistudio.google.com/apikey |
-
-Alternatively look into https://openrouter.ai/models?max_price=0 for free to use LLM's via API.
+| **Supabase** | Free project | https://supabase.com |
+| **Google AI** | Gemini API key (if using Gemini) | https://aistudio.google.com/apikey |
+| **OpenRouter** | API key (if using OpenRouter) | https://openrouter.ai |
+| **Jina.ai** | API key (optional, but recommended if using Jina grounding) | https://jina.ai |
 
 Local tooling:
 
-- [Deno](https://deno.com/) 
-- [Supabase CLI](https://supabase.com/docs/guides/cli/getting-started) — install with `npm install -g supabase` or `brew install supabase/tap/supabase`
+- [Deno](https://deno.com/)
+- [Supabase CLI](https://supabase.com/docs/guides/cli/getting-started) — `npm install -g supabase` or `brew install supabase/tap/supabase`
 - [Git](https://git-scm.com/)
 
 ---
@@ -53,35 +105,35 @@ Local tooling:
 ## Step 1 — Create a Discord Application
 
 1. Go to the [Discord Developer Portal](https://discord.com/developers/applications)
-2. Click **New Application**, give it a name (e.g. "Q&A Bot"), and create it
-3. On the **General Information** page, note down:
-   - **Application ID** (you'll need this as `discord_application_id`)
-   - **Public Key** (you'll need this as `discord_public_key`)
-4. Go to the **Bot** section in the sidebar
-5. Click **Add Bot** (if there isn't one already)
-6. Under the bot's Token section, click **Reset Token** and copy it — you'll need this once to register the slash command. Also note it down for later ref.
+2. Click **New Application**, name it, and create it
+3. On **General Information**, copy:
+   - **Application ID** → `discord_application_id` secret
+   - **Public Key** → `discord_public_key` secret
+4. Go to **Bot**, click **Add Bot**
+5. Under Token, click **Reset Token** and copy it (needed once for slash command registration)
 
+### Add the bot to your server
 
-### Add the bot to your Discord server
-
-1. Go to **OAuth2 → URL Generator** in the sidebar
-2. Under **Scopes**, check:
-   - `bot`
-   - `applications.commands`
-3. Under **Bot Permissions**, check:
-   - `Send Messages`
-   - `Use Slash Commands`
-4. Copy the generated URL at the bottom, open it in your browser, and select the server you want to add the bot to
-
-If you want to build more powerful features, you should select the applicable scopes. It's not uncommong that discord bots need aministrator because developers are lazy - but that would never be me.
+1. Go to **OAuth2 → URL Generator**
+2. Under **Scopes**: check `bot` and `applications.commands`
+3. Under **Bot Permissions**: check `Send Messages` and `Use Slash Commands`
+4. Copy the generated URL, open it in your browser, and add the bot to your server
 
 ---
 
-## Step 2 (if you want to use Gemini) — Get a Gemini API Key
+## Step 2 — Get API Keys
 
+**Gemini** (for `grounded-llm-inference`):
 1. Go to [Google AI Studio](https://aistudio.google.com/apikey)
-2. Click **Create API Key**
-3. Copy the key — you'll need this as `gemini_api_key`
+2. Click **Create API Key** → copy as `gemini_api_key`
+
+**OpenRouter** (for `openrouter-llm-inference` or `openrouter-jina-inference`):
+1. Sign up at [openrouter.ai](https://openrouter.ai)
+2. Create an API key → copy as `openrouter_api_key`
+
+**Jina.ai** (for `openrouter-jina-inference` only):
+1. Sign up at [jina.ai](https://jina.ai)
+2. Create a free API key → copy as `jina_api_key`
 
 ---
 
@@ -89,65 +141,80 @@ If you want to build more powerful features, you should select the applicable sc
 
 ### Create the project
 
-1. Go to [supabase.com](https://supabase.com) and sign in
-2. Click **New Project**
-3. Pick an organization, name the project, set a database password, and choose a region
-4. Wait for the project to finish provisioning
-5. Note your **Project Reference** (the subdomain in your project URL, e.g. `abcdefghijkl` from `https://abcdefghijkl.supabase.co`)
+1. Go to [supabase.com](https://supabase.com), sign in, click **New Project**
+2. Name the project, set a database password, choose a region
+3. Note your **Project Reference** (e.g. `abcdefghijkl` from `https://abcdefghijkl.supabase.co`)
 
 ### Create the cache table
 
-Go to the **SQL Editor** in your Supabase dashboard and run the contents of `supabase/migrations/20260311000000_create_query_cache.sql`:
-sql is in migrations dir. 
+In the **SQL Editor**, run the contents of `supabase/migrations/20260311000000_create_query_cache.sql`:
+
+```sql
+create table if not exists query_cache (
+  id                uuid primary key default gen_random_uuid(),
+  query_normalized  text not null unique,
+  query_original    text not null,
+  response_text     text not null,
+  created_at        timestamptz not null default now(),
+  expires_at        timestamptz not null,
+  hit_count         int not null default 0
+);
+
+create index if not exists idx_query_cache_lookup
+  on query_cache (query_normalized, expires_at);
+
+create index if not exists idx_query_cache_expires
+  on query_cache (expires_at);
+
+alter table query_cache enable row level security;
+
+create policy "Allow all for service role" on query_cache
+  for all using (true) with check (true);
+```
 
 ### Add secrets
-
-Set your custom secrets via the Supabase CLI:
 
 ```bash
 supabase secrets set \
   discord_public_key=YOUR_DISCORD_PUBLIC_KEY \
   discord_application_id=YOUR_DISCORD_APPLICATION_ID \
-  gemini_api_key=YOUR_GEMINI_API_KEY
+  gemini_api_key=YOUR_GEMINI_API_KEY \
+  openrouter_api_key=YOUR_OPENROUTER_API_KEY \
+  jina_api_key=YOUR_JINA_API_KEY
 ```
 
-> **Note:** `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are provided automatically by Supabase — you do **not** need to add them.
-You can do this in supabase console as well, in the section for edge functions.
+You can also set these in **Supabase Dashboard → Edge Functions → Secrets**.
+
+> `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are provided automatically — do not add them.
+
 ---
 
 ## Step 4 — Deploy the Edge Functions
 
-### Link your local project
-
 ```bash
-# Log in to Supabase CLI (opens browser)
+# Log in and link your project
 supabase login
-
-# Link to your remote project
 supabase link --project-ref YOUR_PROJECT_REF
-```
 
-### Deploy
-
-```bash
+# Deploy all functions
 supabase functions deploy discord-interactions --no-verify-jwt
 supabase functions deploy grounded-llm-inference --no-verify-jwt
 supabase functions deploy openrouter-llm-inference --no-verify-jwt
+supabase functions deploy openrouter-jina-inference --no-verify-jwt
 ```
 
-The `--no-verify-jwt` flag is required because Discord sends raw HTTP requests — not Supabase auth tokens.
+> **⚠️ `--no-verify-jwt` is required.** Discord sends raw HTTP requests without Supabase auth tokens. Creating functions via the Supabase console enforces JWT and will result in a permanent 401 from Discord.
 
-After deploying, your function URL will be:
+Your function URLs will follow the pattern:
+```
+https://YOUR_PROJECT_REF.supabase.co/functions/v1/FUNCTION_NAME
+```
 
-```
-https://YOUR_PROJECT_REF.supabase.co/functions/v1/grounded-llm-inference
-```
-NOTE: YOU NEED TO DO IT THIS WAY. CREATING A FUNCTION IN SUPABASE CONSOLE WILL ENFOCE JWT AND CAUSE A PERMANENT 401 CODE ON THE FUNCTION FROM CALLS FROM DISCORD.
 ---
 
 ## Step 5 — Register the Slash Command
 
-Run this once from your terminal. Replace `YOUR_BOT_TOKEN` and `YOUR_APPLICATION_ID`, and choose your own command name (for example, `ask`):
+Run this once. Replace placeholders and choose your command name:
 
 ```bash
 curl -X POST \
@@ -166,74 +233,51 @@ curl -X POST \
   "https://discord.com/api/v10/applications/YOUR_APPLICATION_ID/commands"
 ```
 
-You should get a JSON response with the command details. Global commands can take up to an hour to propagate to all servers.
-
-> **Tip:** For faster testing, register a guild-specific command instead by changing the URL to:
-> `https://discord.com/api/v10/applications/YOUR_APPLICATION_ID/guilds/YOUR_GUILD_ID/commands`
-> Guild commands are available immediately.
+> **Tip:** For immediate availability during testing, register a guild-specific command:
+> ```
+> https://discord.com/api/v10/applications/YOUR_APPLICATION_ID/guilds/YOUR_GUILD_ID/commands
+> ```
+> Global commands can take up to an hour to propagate. In my testing they become available in 15-30min of time.
 
 ---
 
 ## Step 6 — Set the Interactions Endpoint URL
 
-1. Go back to the [Discord Developer Portal](https://discord.com/developers/applications)
-2. Select your application
-3. On the **General Information** page, find **Interactions Endpoint URL**
-4. Enter your `discord-interactions` Edge Function URL **with the anon key as a query parameter**:
+1. Go to the [Discord Developer Portal](https://discord.com/developers/applications) → select your app
+2. On **General Information**, find **Interactions Endpoint URL**
+3. Enter your `discord-interactions` URL with the anon key as a query parameter:
    ```
    https://YOUR_PROJECT_REF.supabase.co/functions/v1/discord-interactions?apikey=YOUR_SUPABASE_ANON_KEY
    ```
-   > **Why the `apikey`?** Even with `--no-verify-jwt`, Supabase's API gateway still
-   > requires an API key to route the request. Discord sends plain POST requests with
-   > no custom headers, so without the key in the URL, the gateway rejects the request
-   > before it ever reaches your function. The anon key is designed to be public
-   > (it's used in frontends), so this is safe — your real security comes from
-   > Discord's signature verification inside the function.
-   >
-   > Find the publishable key in **Supabase Dashboard → Settings → API → Project API keys → Publishable key** (also called the anon key).
-5. Click **Save Changes**
 
-Discord will send a PING to verify the endpoint. If the function is deployed correctly, it will respond with PONG and Discord will accept the URL.
+> **Why `?apikey=...`?** Even with `--no-verify-jwt`, Supabase's API gateway requires an API key to route the request. Discord sends plain POST requests with no custom headers, so the key must be in the URL. The anon key is safe to expose — security comes from Discord's signature verification inside the function.
+>
+> Find it at: **Supabase Dashboard → Settings → API → Project API keys → Publishable key**
 
-If it fails, check:
-- The function is deployed (`supabase functions list`)
-- The `discord_public_key` secret is correct
-- The `--no-verify-jwt` flag was used during deploy
-- The `apikey` query parameter in the URL matches your Supabase publishable key
+4. Click **Save Changes**
+
+Discord will send a PING to verify. A successful deploy responds with PONG.
+
+If verification fails:
+- Confirm the function is deployed: `supabase functions list`
+- Check `discord_public_key` is set correctly
+- Confirm `--no-verify-jwt` was used
+- Confirm the `apikey` query param matches your anon key
 
 ---
 
 ## Step 7 — Test It
 
-Go to your Discord server and try (assuming you named your command `ask`):
+These commands depend on your mapping, use whatever you've created.
 
 ```
 /ask question: how do I deploy this bot?
-/ask question: what environment variables does this bot need?
+/ask question: what is the best tank spec for TBC?
 /ask question: how does the cache work?
 ```
 
-- First time: you'll see "Bot is thinking…" while Gemini processes, then the answer appears
-- Second time (same question): instant response from cache
-
----
-
-## Project Structure
-
-```
-supabase/
-  functions/
-    grounded-llm-inference/            ← Supabase Edge Function
-      index.ts              ← main handler & logic
-  migrations/
-    20260311000000_create_query_cache.sql  ← cache table
-README.md
-```
-
----
-
-## Customizing the System Prompt
-Edit the system prompt in function code, redeploy. 
+- **First request:** "Bot is thinking…" while the LLM processes, then answer appears
+- **Same question again:** instant response from cache
 
 ---
 
@@ -241,32 +285,30 @@ Edit the system prompt in function code, redeploy.
 
 ### Request flow
 
-1. User types `/ask question: <text>` in Discord
-2. Discord sends an HTTP POST to your Edge Function
-3. Function verifies the request signature (Ed25519 using the public key)
-4. Function checks the `query_cache` table for a cached answer
-5. **Cache hit** → responds instantly (Discord interaction type 4)
-6. **Cache miss** → responds with "Bot is thinking…" (type 5 — deferred), then:
-   - Calls Gemini 2.0 Flash with Google Search grounding
+1. User runs a slash command in Discord
+2. Discord sends an HTTP POST to `discord-interactions`
+3. Function verifies the Ed25519 request signature using `discord_public_key`
+4. Function routes to the appropriate inference function based on command name
+5. Inference function checks `query_cache` for a matching (non-expired) answer
+6. **Cache hit** → responds instantly (Discord interaction type 4)
+7. **Cache miss** → defers with "Bot is thinking…" (type 5), then:
+   - Optionally fetches web grounding context (Gemini Search / Jina.ai)
+   - Calls LLM with system prompt + optional context
    - Saves the answer to cache (7-day TTL)
-   - Edits the original Discord response with the answer
+   - Edits the original deferred response with the answer
 
-### Secrets reference
+### Cache behaviour
 
-| Secret | Auto-provided | Description |
-|--------|:---:|-------------|
-| `SUPABASE_URL` | ✅ | Your project URL |
-| `SUPABASE_SERVICE_ROLE_KEY` | ✅ | Bypasses RLS for DB access |
-| `discord_public_key` | ❌ | For signature verification |
-| `discord_application_id` | ❌ | For Discord webhook URLs |
-| `gemini_api_key` | ❌ | For Gemini API calls |
+- Queries are normalised (lowercase, trimmed, punctuation removed) before lookup
+- TTL is 7 days (set `CACHE_TTL_HOURS` in each `index.ts`)
+- `hit_count` tracks reuse per cached answer
+- Upsert on `query_normalized` — re-asking after expiry refreshes the entry
 
-### Cache behavior
+---
 
-- Queries are normalized (lowercase, trimmed, punctuation removed) before lookup
-- Cache TTL is 7 days (configurable via `CACHE_TTL_HOURS` in `index.ts`)
-- `hit_count` tracks how often each cached answer is reused
-- Cache uses upsert on `query_normalized` — re-asking after expiry refreshes the entry
+## Customising the System Prompt
+
+Edit the `SYSTEM_PROMPT` constant in whichever `index.ts` you're using, then redeploy that function.
 
 ---
 
@@ -274,28 +316,18 @@ Edit the system prompt in function code, redeploy.
 
 | Problem | Fix |
 |---------|-----|
-| Discord says "Interactions Endpoint URL is invalid" | Check that the function is deployed with `--no-verify-jwt` and `discord_public_key` is correct |
-| Bot responds with "Please provide a question!" | Make sure you're using the `question:` option — type `/tbc` and wait for the autocomplete |
-| Bot says "Something went wrong" | Check Edge Function logs: `supabase functions logs grounded-llm-inference` — likely a bad `gemini_api_key` |
-| Slash command doesn't appear in Discord | Global commands take up to an hour. Use a guild command for instant testing |
-| Cache never hits | Check that the `query_cache` table exists and RLS is disabled (or you're using the service role key) |
-
----
-
-## Free Tier Limits
-
-| Service | Limit | Enough for |
-|---------|-------|-----------|
-| **Supabase Edge Functions** | 500K invocations/month, 150s wall-clock, 256MB memory | Plenty for a Discord bot |
-| **Supabase Postgres** | 500MB database | Thousands of cached queries |
-| **Gemini API (free)** | 15 RPM / 1M TPM | Light-to-moderate usage; cache reduces calls |
-| **Discord** | No hard limit on interactions | N/A |
+| Discord says "Interactions Endpoint URL is invalid" | Confirm function is deployed with `--no-verify-jwt` and `discord_public_key` is correct |
+| Bot responds "Please provide a question!" | Ensure you're using the `question:` option in the slash command |
+| Bot says "Something went wrong" | Check logs: `supabase functions logs grounded-llm-inference` — likely a bad API key |
+| Slash command doesn't appear | Global commands take up to an hour. Use guild commands for immediate testing |
+| Cache never hits | Confirm `query_cache` table exists and RLS policy allows service role access |
+| 401 on every Discord request | Function was deployed via Supabase console (enforces JWT) — redeploy via CLI with `--no-verify-jwt` |
 
 ---
 
 ## Optional: Clean Up Expired Cache
 
-You can periodically delete expired rows to keep the table tidy. Run this manually or set up a Supabase cron job (pg_cron):
+Run manually or schedule with `pg_cron`:
 
 ```sql
 delete from query_cache where expires_at < now();
@@ -305,7 +337,6 @@ delete from query_cache where expires_at < now();
 
 ## License
 
-Do whatever you want with this. It’s a Discord bot, not a space shuttle.
+Do whatever you want with this. It's a Discord bot, not a space shuttle.
 
-
-Oh yeah and for any cool shit you can email me at julius.juutilainen@protonmail.com
+Questions or cool stuff → julius.juutilainen@protonmail.com

@@ -12,7 +12,7 @@ Originally built to answer WoW TBC questions in a Discord channel, but the patte
 ## Architecture
 
 ```
-User types /ask in Discord
+User types e.g. "/ask" in Discord
         │
         ▼
 Discord API
@@ -21,8 +21,8 @@ Discord API
 discord-interactions  (Supabase Edge Function)
         │  verify signature, route by command name
         ▼
-Handler Edge Function  (grounded-llm-inference / openrouter-*)
-        │  call LLM, build response
+Handler Edge Function  (multiple)
+        │  build response
         ▼
 Discord API
         │

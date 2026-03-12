@@ -246,7 +246,7 @@ Deno.serve(async (req: Request) => {
   if (interaction.type === InteractionType.APPLICATION_COMMAND) {
     const options = interaction.data?.options ?? [];
     const questionOpt = options.find(
-      (o: { name: string; value: string }) => o.name === "question",
+      (o: { name: string; value: string }) => o.name === "query",
     );
     const question: string | undefined = questionOpt?.value?.trim();
 

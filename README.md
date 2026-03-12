@@ -1,13 +1,14 @@
-# Q&A Bot — Discord Slash Command Template
+# Discord bot using supabase as a free hosting platform.
 
-A serverless Discord bot template that answers questions on a specific topic using Gemini with Google Search grounding, hosted entirely on Supabase (Edge Function + Postgres cache).
+The purpose of this repo is to serve as a free-to-use POC on hosting Siscord bots on Supabase. Supabase is a postgres development platform, more here (github.com/supabase/supabase).
 
-No always-on server. No WebSocket gateway. Just a single HTTP endpoint that Discord calls when someone uses a slash command (for example, `/ask`).
+My template is for creating a simple bot that uses Gemini's generous free tier LLM inference to reference the web and answer a user question. Gemini API pricing guide (https://ai.google.dev/gemini-api/docs/pricing).
+But you could use this same guide for pretty much anything a discord bot would like to do, as long as it's within Supabase edge function runtime limits. In my case, I wanted a bot to answer WoW TBC related questions straight in channel. To the end user it's just a single HTTP endpoint that Discord calls when someone uses a slash command (for example, `/ask`).
 
-## Architecture
+## Architecture for my usecase
 
 ```
-User runs /tbc in Discord
+User runs /ask in Discord
         │
         ▼
 Discord sends HTTP POST ──▶ Supabase Edge Function
@@ -17,7 +18,7 @@ Discord sends HTTP POST ──▶ Supabase Edge Function
                             └───┬───────┬───┘
                               yes       no
                                │         │
-                               │    Gemini 2.0 Flash
+                               │    Gemini 2.0 Flash (or your setup)
                                │    (Google Search grounding)
                                │         │
                                │    Save to cache
@@ -36,11 +37,14 @@ You need accounts and API keys from three services. All have free tiers.
 |---------|--------------|-----------------|
 | **Discord** | Developer account | https://discord.com/developers |
 | **Supabase** | Project (free plan) | https://supabase.com |
+For AI
 | **Google AI** | Gemini API key | https://aistudio.google.com/apikey |
+
+Alternatively look into https://openrouter.ai/models?max_price=0 for free to use LLM's via API.
 
 Local tooling:
 
-- [Node.js](https://nodejs.org/) (v18+)
+- [Deno](https://deno.com/) 
 - [Supabase CLI](https://supabase.com/docs/guides/cli/getting-started) — install with `npm install -g supabase` or `brew install supabase/tap/supabase`
 - [Git](https://git-scm.com/)
 
@@ -55,7 +59,8 @@ Local tooling:
    - **Public Key** (you'll need this as `discord_public_key`)
 4. Go to the **Bot** section in the sidebar
 5. Click **Add Bot** (if there isn't one already)
-6. Under the bot's Token section, click **Reset Token** and copy it — you'll need this once to register the slash command
+6. Under the bot's Token section, click **Reset Token** and copy it — you'll need this once to register the slash command. Also note it down for later ref.
+
 
 ### Add the bot to your Discord server
 
@@ -68,9 +73,11 @@ Local tooling:
    - `Use Slash Commands`
 4. Copy the generated URL at the bottom, open it in your browser, and select the server you want to add the bot to
 
+If you want to build more powerful features, you should select the applicable scopes. It's not uncommong that discord bots need aministrator because developers are lazy - but that would never be me.
+
 ---
 
-## Step 2 — Get a Gemini API Key
+## Step 2 (if you want to use Gemini) — Get a Gemini API Key
 
 1. Go to [Google AI Studio](https://aistudio.google.com/apikey)
 2. Click **Create API Key**
@@ -91,24 +98,7 @@ Local tooling:
 ### Create the cache table
 
 Go to the **SQL Editor** in your Supabase dashboard and run the contents of `supabase/migrations/20260311000000_create_query_cache.sql`:
-
-```sql
-create table if not exists query_cache (
-  id               uuid primary key default gen_random_uuid(),
-  query_normalized text not null unique,
-  query_original   text not null,
-  response_text    text not null,
-  created_at       timestamptz not null default now(),
-  expires_at       timestamptz not null,
-  hit_count        int not null default 0
-);
-
-create index if not exists idx_query_cache_lookup
-  on query_cache (query_normalized, expires_at);
-
-create index if not exists idx_query_cache_expires
-  on query_cache (expires_at);
-```
+sql is in migrations dir. 
 
 ### Add secrets
 
@@ -122,7 +112,7 @@ supabase secrets set \
 ```
 
 > **Note:** `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are provided automatically by Supabase — you do **not** need to add them.
-
+You can do this in supabase console as well, in the section for edge functions.
 ---
 
 ## Step 4 — Deploy the Edge Function
@@ -150,7 +140,7 @@ After deploying, your function URL will be:
 ```
 https://YOUR_PROJECT_REF.supabase.co/functions/v1/discord-bot
 ```
-
+NOTE: YOU NEED TO DO IT THIS WAY. CREATING A FUNCTION IN SUPABASE CONSOLE WILL ENFOCE JWT AND CAUSE A PERMANENT 401 CODE ON THE FUNCTION FROM CALLS FROM DISCORD.
 ---
 
 ## Step 5 — Register the Slash Command
@@ -261,7 +251,7 @@ You can safely tweak tone, rules, and formatting in `system_prompt.jinja` withou
 
 ### Request flow
 
-1. User types `/tbc question: <text>` in Discord
+1. User types `/ask question: <text>` in Discord
 2. Discord sends an HTTP POST to your Edge Function
 3. Function verifies the request signature (Ed25519 using the public key)
 4. Function checks the `query_cache` table for a cached answer
@@ -326,3 +316,6 @@ delete from query_cache where expires_at < now();
 ## License
 
 Do whatever you want with this. It’s a Discord bot, not a space shuttle.
+
+
+Oh yeah and for any cool shit you can email me at julius.juutilainen@protonmail.com

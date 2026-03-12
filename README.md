@@ -1,8 +1,8 @@
-# TBC Bot — WoW Classic: The Burning Crusade Discord Bot
+# Q&A Bot — Discord Slash Command Template
 
-A serverless Discord bot that answers WoW Classic TBC questions using Gemini with Google Search grounding, hosted entirely on Supabase (Edge Function + Postgres cache).
+A serverless Discord bot template that answers questions on a specific topic using Gemini with Google Search grounding, hosted entirely on Supabase (Edge Function + Postgres cache).
 
-No always-on server. No WebSocket gateway. Just a single HTTP endpoint that Discord calls when someone uses the `/tbc` slash command.
+No always-on server. No WebSocket gateway. Just a single HTTP endpoint that Discord calls when someone uses a slash command (for example, `/ask`).
 
 ## Architecture
 
@@ -49,7 +49,7 @@ Local tooling:
 ## Step 1 — Create a Discord Application
 
 1. Go to the [Discord Developer Portal](https://discord.com/developers/applications)
-2. Click **New Application**, give it a name (e.g. "TBC Bot"), and create it
+2. Click **New Application**, give it a name (e.g. "Q&A Bot"), and create it
 3. On the **General Information** page, note down:
    - **Application ID** (you'll need this as `discord_application_id`)
    - **Public Key** (you'll need this as `discord_public_key`)
@@ -90,10 +90,10 @@ Local tooling:
 
 ### Create the cache table
 
-Go to the **SQL Editor** in your Supabase dashboard and run the contents of `supabase/migrations/20260311000000_create_wow_cache.sql`:
+Go to the **SQL Editor** in your Supabase dashboard and run the contents of `supabase/migrations/20260311000000_create_query_cache.sql`:
 
 ```sql
-create table if not exists wow_cache (
+create table if not exists query_cache (
   id               uuid primary key default gen_random_uuid(),
   query_normalized text not null unique,
   query_original   text not null,
@@ -103,11 +103,11 @@ create table if not exists wow_cache (
   hit_count        int not null default 0
 );
 
-create index if not exists idx_wow_cache_lookup
-  on wow_cache (query_normalized, expires_at);
+create index if not exists idx_query_cache_lookup
+  on query_cache (query_normalized, expires_at);
 
-create index if not exists idx_wow_cache_expires
-  on wow_cache (expires_at);
+create index if not exists idx_query_cache_expires
+  on query_cache (expires_at);
 ```
 
 ### Add secrets
@@ -140,7 +140,7 @@ supabase link --project-ref YOUR_PROJECT_REF
 ### Deploy
 
 ```bash
-supabase functions deploy discord-tbc --no-verify-jwt
+supabase functions deploy discord-bot --no-verify-jwt
 ```
 
 The `--no-verify-jwt` flag is required because Discord sends raw HTTP requests — not Supabase auth tokens.
@@ -148,25 +148,25 @@ The `--no-verify-jwt` flag is required because Discord sends raw HTTP requests �
 After deploying, your function URL will be:
 
 ```
-https://YOUR_PROJECT_REF.supabase.co/functions/v1/discord-tbc
+https://YOUR_PROJECT_REF.supabase.co/functions/v1/discord-bot
 ```
 
 ---
 
-## Step 5 — Register the `/tbc` Slash Command
+## Step 5 — Register the Slash Command
 
-Run this once from your terminal. Replace `YOUR_BOT_TOKEN` and `YOUR_APPLICATION_ID`:
+Run this once from your terminal. Replace `YOUR_BOT_TOKEN` and `YOUR_APPLICATION_ID`, and choose your own command name (for example, `ask`):
 
 ```bash
 curl -X POST \
   -H "Content-Type: application/json" \
   -H "Authorization: Bot YOUR_BOT_TOKEN" \
   -d '{
-    "name": "tbc",
-    "description": "Ask a WoW Classic TBC question",
+    "name": "ask",
+    "description": "Ask a question",
     "options": [{
       "name": "question",
-      "description": "Your TBC question",
+      "description": "Your question",
       "type": 3,
       "required": true
     }]
@@ -189,7 +189,7 @@ You should get a JSON response with the command details. Global commands can tak
 3. On the **General Information** page, find **Interactions Endpoint URL**
 4. Enter your Edge Function URL **with the anon key as a query parameter**:
    ```
-   https://YOUR_PROJECT_REF.supabase.co/functions/v1/discord-tbc?apikey=YOUR_SUPABASE_ANON_KEY
+   https://YOUR_PROJECT_REF.supabase.co/functions/v1/discord-bot?apikey=YOUR_SUPABASE_ANON_KEY
    ```
    > **Why the `apikey`?** Even with `--no-verify-jwt`, Supabase's API gateway still
    > requires an API key to route the request. Discord sends plain POST requests with
@@ -213,12 +213,12 @@ If it fails, check:
 
 ## Step 7 — Test It
 
-Go to your Discord server and try:
+Go to your Discord server and try (assuming you named your command `ask`):
 
 ```
-/tbc question: where does Hand of Justice drop
-/tbc question: best pre-raid caster staff for horde
-/tbc question: kara attunement quest chain
+/ask question: how do I deploy this bot?
+/ask question: what environment variables does this bot need?
+/ask question: how does the cache work?
 ```
 
 - First time: you'll see "Bot is thinking…" while Gemini processes, then the answer appears
@@ -231,12 +231,29 @@ Go to your Discord server and try:
 ```
 supabase/
   functions/
-    discord-tbc/
-      index.ts          ← the entire Edge Function
+    discord-bot/            ← Supabase Edge Function
+      index.ts              ← main handler & logic
+      system_prompt.jinja   ← Jinja template for Gemini system prompt
   migrations/
-    20260311000000_create_wow_cache.sql  ← cache table
+    20260311000000_create_query_cache.sql  ← cache table
 README.md
 ```
+
+---
+
+## Customizing the System Prompt
+
+The bot’s behavior is driven by a **Jinja-formatted system prompt** used by Gemini.
+
+- **Template file**: `supabase/functions/discord-bot/system_prompt.jinja`
+- **Format**: Plain text with optional Jinja-style placeholders (e.g. `{{ variable }}`) if you later decide to introduce dynamic values
+- **Deployment**: Any changes to the template require a function redeploy:
+
+```bash
+supabase functions deploy discord-bot --no-verify-jwt
+```
+
+You can safely tweak tone, rules, and formatting in `system_prompt.jinja` without touching TypeScript code, as long as the overall instructions stay within Discord’s message length limits.
 
 ---
 
@@ -247,7 +264,7 @@ README.md
 1. User types `/tbc question: <text>` in Discord
 2. Discord sends an HTTP POST to your Edge Function
 3. Function verifies the request signature (Ed25519 using the public key)
-4. Function checks the `wow_cache` table for a cached answer
+4. Function checks the `query_cache` table for a cached answer
 5. **Cache hit** → responds instantly (Discord interaction type 4)
 6. **Cache miss** → responds with "Bot is thinking…" (type 5 — deferred), then:
    - Calls Gemini 2.0 Flash with Google Search grounding
@@ -279,9 +296,9 @@ README.md
 |---------|-----|
 | Discord says "Interactions Endpoint URL is invalid" | Check that the function is deployed with `--no-verify-jwt` and `discord_public_key` is correct |
 | Bot responds with "Please provide a question!" | Make sure you're using the `question:` option — type `/tbc` and wait for the autocomplete |
-| Bot says "Something went wrong" | Check Edge Function logs: `supabase functions logs discord-tbc` — likely a bad `gemini_api_key` |
+| Bot says "Something went wrong" | Check Edge Function logs: `supabase functions logs discord-bot` — likely a bad `gemini_api_key` |
 | Slash command doesn't appear in Discord | Global commands take up to an hour. Use a guild command for instant testing |
-| Cache never hits | Check that the `wow_cache` table exists and RLS is disabled (or you're using the service role key) |
+| Cache never hits | Check that the `query_cache` table exists and RLS is disabled (or you're using the service role key) |
 
 ---
 
@@ -301,11 +318,11 @@ README.md
 You can periodically delete expired rows to keep the table tidy. Run this manually or set up a Supabase cron job (pg_cron):
 
 ```sql
-delete from wow_cache where expires_at < now();
+delete from query_cache where expires_at < now();
 ```
 
 ---
 
 ## License
 
-Do whatever you want with this. It's a WoW bot, not a space shuttle.
+Do whatever you want with this. It’s a Discord bot, not a space shuttle.

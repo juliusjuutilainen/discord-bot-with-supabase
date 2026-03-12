@@ -42,18 +42,10 @@ const InteractionResponseType = {
   DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE: 5,
 } as const;
 
-// ─── System Prompt ───────────────────────────────────────────────────────────
-const SYSTEM_PROMPT = `You are a WoW Classic: The Burning Crusade (TBC) assistant.
-
-Rules:
-- Answer ONLY about WoW Classic: The Burning Crusade (patch 2.4.3 / pre-Wrath).
-- If a question is about Retail WoW, Classic Era (vanilla), or Wrath of the Lich King, say so and decline.
-- Prefer short, practical answers: direct answer first, then 2–5 bullet points if needed.
-- State assumptions (spec, phase, faction) when the question is ambiguous.
-- Do NOT invent item stats, drop rates, quest details, or boss mechanics. If unsure, say so.
-- Include source names when possible (e.g. Wowhead, WoW Wiki).
-- Format for Discord: use **bold** for item/spell names, bullet points for lists.
-- Keep total response under 1800 characters.`;
+// ─── System Prompt (Jinja template) ──────────────────────────────────────────
+const SYSTEM_PROMPT = await Deno.readTextFile(
+  new URL("./system_prompt.jinja", import.meta.url),
+);
 
 // ─── Hex helpers ─────────────────────────────────────────────────────────────
 function hexToUint8Array(hex: string): Uint8Array {
@@ -102,7 +94,7 @@ function normalizeQuery(query: string): string {
 // ─── Cache: read ─────────────────────────────────────────────────────────────
 async function checkCache(normalized: string): Promise<string | null> {
   const { data, error } = await supabase
-    .from("wow_cache")
+    .from("query_cache")
     .select("id, response_text, hit_count")
     .eq("query_normalized", normalized)
     .gt("expires_at", new Date().toISOString())
@@ -113,7 +105,7 @@ async function checkCache(normalized: string): Promise<string | null> {
 
   // bump hit_count (fire-and-forget, non-blocking)
   supabase
-    .from("wow_cache")
+    .from("query_cache")
     .update({ hit_count: (data.hit_count ?? 0) + 1 })
     .eq("id", data.id)
     .then();
@@ -131,7 +123,7 @@ async function saveCache(
     Date.now() + CACHE_TTL_HOURS * 60 * 60 * 1000,
   ).toISOString();
 
-  await supabase.from("wow_cache").upsert(
+  await supabase.from("query_cache").upsert(
     {
       query_normalized: normalized,
       query_original: original,
@@ -322,7 +314,7 @@ Deno.serve(async (req: Request) => {
         type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
         data: {
           content:
-            "Please provide a question!\nExample: `/tbc question: where does Hand of Justice drop`",
+            "Please provide a question!\nExample: `/ask question: how do I deploy this bot?`",
         },
       });
     }
@@ -347,3 +339,4 @@ Deno.serve(async (req: Request) => {
 
   return jsonResponse({ error: "Unknown interaction type" }, 400);
 });
+

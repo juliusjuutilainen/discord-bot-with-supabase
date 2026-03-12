@@ -1,5 +1,5 @@
--- Cache table for TBC bot responses
-create table if not exists wow_cache (
+-- Cache table for bot responses
+create table if not exists query_cache (
   id          uuid primary key default gen_random_uuid(),
   query_normalized text not null unique,
   query_original   text not null,
@@ -10,9 +10,10 @@ create table if not exists wow_cache (
 );
 
 -- Index for fast lookups by normalized query + expiry
-create index if not exists idx_wow_cache_lookup
-  on wow_cache (query_normalized, expires_at);
+create index if not exists idx_query_cache_lookup
+  on query_cache (query_normalized, expires_at);
 
 -- Optional: index for cleaning up expired rows later
-create index if not exists idx_wow_cache_expires
-  on wow_cache (expires_at);
+create index if not exists idx_query_cache_expires
+  on query_cache (expires_at);
+

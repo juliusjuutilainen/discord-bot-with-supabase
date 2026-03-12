@@ -1,8 +1,7 @@
 // supabase/functions/discord-interactions/index.ts
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { verifyDiscordRequest } from "../_shared/discord.ts";
 
-serve(async (req) => {
+Deno.serve(async (req) => {
   // 1. Verify Discord signature (required!)
   const { valid, body } = await verifyDiscordRequest(req);
   if (!valid) return new Response("Unauthorized", { status: 401 });
@@ -23,6 +22,7 @@ serve(async (req) => {
     const commandToFunction: Record<string, string> = {
       //commands go here
       ask: "grounded-llm-inference",
+      openrouter: "openrouter-llm-inference",
     };
 
     const fnName = commandToFunction[command];
@@ -34,6 +34,8 @@ serve(async (req) => {
     }
 
     return await invokeFunction(fnName, interaction);
+  } else {
+    return new Response("Bad Request", { status: 400 });
   }
 });
 

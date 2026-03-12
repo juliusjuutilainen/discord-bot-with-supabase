@@ -1,5 +1,5 @@
 // supabase/functions/_shared/discord.ts
-import { verify } from "https://deno.land/x/discord_verify/mod.ts";
+import { verify } from "https://deno.land/x/discord_verify@1.0.2/mod.ts";
 
 export async function verifyDiscordRequest(req: Request) {
   const signature = req.headers.get("x-signature-ed25519") ?? "";

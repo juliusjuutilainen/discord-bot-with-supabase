@@ -1,0 +1,276 @@
+// supabase/functions/openrouter-llm-inference/index.ts
+// Simple LLM inference via OpenRouter free tier, with Supabase query caching.
+// Register the /ask-or (or any) slash command and map it in discord-interactions/index.ts.
+
+import { createClient } from "npm:@supabase/supabase-js@2";
+
+// ─── Environment ─────────────────────────────────────────────────────────────
+const DISCORD_APP_ID = Deno.env.get("discord_application_id")!;
+const OPENROUTER_API_KEY = Deno.env.get("openrouter_api_key")!;
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+// ─── Constants ───────────────────────────────────────────────────────────────
+const CACHE_TTL_HOURS = 168; // 7 days — set to 0 to disable caching
+const DISCORD_MAX_LENGTH = 2000;
+const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
+
+// ─── Model fallback chain ────────────────────────────────────────────────────
+// These are free-tier models on OpenRouter (no credits required).
+// Full list: https://openrouter.ai/models?q=free
+// Models with ":free" suffix are always free. Add/remove as needed.
+const MODELS: string[] = [
+  "google/gemini-2.0-flash-exp:free",
+  "meta-llama/llama-4-maverick:free",
+  "deepseek/deepseek-chat-v3-0324:free",
+  "mistralai/mistral-7b-instruct:free",
+];
+
+// ─── System prompt ───────────────────────────────────────────────────────────
+// Edit this to give your bot its personality / topic focus.
+const SYSTEM_PROMPT = await Deno.readTextFile(
+    new URL("./system_prompt.jinja", import.meta.url),
+  );
+
+// ─── Discord interaction type constants ───────────────────────────────────────
+const InteractionType = {
+  APPLICATION_COMMAND: 2,
+} as const;
+
+const InteractionResponseType = {
+  CHANNEL_MESSAGE_WITH_SOURCE: 4,
+  DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE: 5,
+} as const;
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+function jsonResponse(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function normalizeQuery(query: string): string {
+  return query
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+// ─── Cache: read ─────────────────────────────────────────────────────────────
+async function checkCache(normalized: string): Promise<string | null> {
+  if (CACHE_TTL_HOURS === 0) return null;
+
+  const { data, error } = await supabase
+    .from("query_cache")
+    .select("id, response_text, hit_count")
+    .eq("query_normalized", normalized)
+    .gt("expires_at", new Date().toISOString())
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  supabase
+    .from("query_cache")
+    .update({ hit_count: (data.hit_count ?? 0) + 1 })
+    .eq("id", data.id)
+    .then();
+
+  return data.response_text;
+}
+
+// ─── Cache: write ─────────────────────────────────────────────────────────────
+async function saveCache(
+  original: string,
+  normalized: string,
+  responseText: string,
+): Promise<void> {
+  if (CACHE_TTL_HOURS === 0) return;
+
+  const expiresAt = new Date(
+    Date.now() + CACHE_TTL_HOURS * 60 * 60 * 1000,
+  ).toISOString();
+
+  await supabase.from("query_cache").upsert(
+    {
+      query_normalized: normalized,
+      query_original: original,
+      response_text: responseText,
+      expires_at: expiresAt,
+      // Note: intentionally not resetting hit_count on refresh
+      // — remove the field here if you want to preserve it on upsert
+    },
+    { onConflict: "query_normalized" },
+  );
+}
+
+// ─── OpenRouter: single model call ───────────────────────────────────────────
+interface OpenRouterResult {
+  text: string;
+  model: string;
+}
+
+async function callOpenRouterModel(
+  question: string,
+  model: string,
+): Promise<OpenRouterResult> {
+  const res = await fetch(OPENROUTER_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+      // Recommended by OpenRouter for tracking / rate limit attribution
+      "HTTP-Referer": Deno.env.get("SUPABASE_URL") ?? "https://supabase.io",
+      "X-Title": "Discord Bot",
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: question },
+      ],
+      max_tokens: 600, // ~1800 chars; well within Discord's 2000 char limit
+    }),
+  });
+
+  if (!res.ok) {
+    const errBody = await res.text();
+    console.error(`[${model}] OpenRouter error ${res.status}:`, errBody);
+    throw new Error(`${model} returned ${res.status}`);
+  }
+
+  const data = await res.json();
+  const text: string | undefined = data.choices?.[0]?.message?.content?.trim();
+
+  if (!text) throw new Error(`${model}: empty response`);
+
+  return { text, model };
+}
+
+// ─── OpenRouter: try models in order, fallback on failure ────────────────────
+async function askOpenRouter(question: string): Promise<OpenRouterResult> {
+  let lastError: Error | null = null;
+
+  for (const model of MODELS) {
+    try {
+      const result = await callOpenRouterModel(question, model);
+      if (model !== MODELS[0]) {
+        console.log(`Fallback succeeded with ${model}`);
+      }
+      return result;
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      console.warn(`Model ${model} failed, trying next...`);
+    }
+  }
+
+  throw lastError ?? new Error("All OpenRouter models failed");
+}
+
+// ─── Discord: edit the deferred response ─────────────────────────────────────
+async function editOriginalResponse(
+  token: string,
+  content: string,
+): Promise<void> {
+  const url =
+    `https://discord.com/api/v10/webhooks/${DISCORD_APP_ID}/${token}/messages/@original`;
+
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+
+  if (!res.ok) {
+    console.error("Discord PATCH error:", res.status, await res.text());
+  }
+}
+
+// ─── Process query (runs after deferral) ─────────────────────────────────────
+async function processQuery(
+  question: string,
+  interactionToken: string,
+): Promise<void> {
+  const normalized = normalizeQuery(question);
+
+  try {
+    const cached = await checkCache(normalized);
+    if (cached) {
+      await editOriginalResponse(interactionToken, cached);
+      return;
+    }
+
+    const result = await askOpenRouter(question);
+
+    // Build response with subtle footer
+    let answer = result.text;
+    const footer = `\n-# ${result.model}`;
+    const maxLen = DISCORD_MAX_LENGTH - footer.length - 20;
+    if (answer.length > maxLen) {
+      answer = answer.substring(0, maxLen) + "\n\n*…truncated*";
+    }
+    answer += footer;
+
+    saveCache(question, normalized, answer).catch((e) =>
+      console.error("Cache save error:", e)
+    );
+
+    await editOriginalResponse(interactionToken, answer);
+  } catch (err) {
+    console.error("processQuery error:", err);
+    await editOriginalResponse(
+      interactionToken,
+      "⚠️ Something went wrong. Please try again.",
+    );
+  }
+}
+
+// ─── Main handler ─────────────────────────────────────────────────────────────
+Deno.serve(async (req: Request) => {
+  if (req.method !== "POST") {
+    return jsonResponse({ error: "Method not allowed" }, 405);
+  }
+
+  const interaction = await req.json();
+
+  if (interaction.type === InteractionType.APPLICATION_COMMAND) {
+    const options = interaction.data?.options ?? [];
+    const questionOpt = options.find(
+      (o: { name: string; value: string }) => o.name === "question",
+    );
+    const question: string | undefined = questionOpt?.value?.trim();
+
+    if (!question) {
+      return jsonResponse({
+        type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+        data: {
+          content:
+            "Please provide a question!\nExample: `/ask-or question: what is the meaning of life?`",
+        },
+      });
+    }
+
+    // Fast path: cache hit
+    const normalized = normalizeQuery(question);
+    const cached = await checkCache(normalized);
+    if (cached) {
+      return jsonResponse({
+        type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+        data: { content: cached },
+      });
+    }
+
+    // Slow path: defer and process in background
+    processQuery(question, interaction.token).catch(console.error);
+
+    return jsonResponse({
+      type: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
+    });
+  }
+
+  return jsonResponse({ error: "Unknown interaction type" }, 400);
+});

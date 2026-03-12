@@ -132,6 +132,7 @@ supabase link --project-ref YOUR_PROJECT_REF
 ```bash
 supabase functions deploy discord-interactions --no-verify-jwt
 supabase functions deploy grounded-llm-inference --no-verify-jwt
+supabase functions deploy openrouter-llm-inference --no-verify-jwt
 ```
 
 The `--no-verify-jwt` flag is required because Discord sends raw HTTP requests — not Supabase auth tokens.
@@ -224,7 +225,6 @@ supabase/
   functions/
     grounded-llm-inference/            ← Supabase Edge Function
       index.ts              ← main handler & logic
-      system_prompt.jinja   ← Jinja template for Gemini system prompt
   migrations/
     20260311000000_create_query_cache.sql  ← cache table
 README.md
@@ -233,18 +233,7 @@ README.md
 ---
 
 ## Customizing the System Prompt
-
-The bot’s behavior is driven by a **Jinja-formatted system prompt** used by Gemini.
-
-- **Template file**: `supabase/functions/grounded-llm-inference/system_prompt.jinja`
-- **Format**: Plain text with optional Jinja-style placeholders (e.g. `{{ variable }}`) if you later decide to introduce dynamic values
-- **Deployment**: Any changes to the template require a function redeploy:
-
-```bash
-supabase functions deploy grounded-llm-inference --no-verify-jwt
-```
-
-You can safely tweak tone, rules, and formatting in `system_prompt.jinja` without touching TypeScript code, as long as the overall instructions stay within Discord’s message length limits.
+Edit the system prompt in function code, redeploy. 
 
 ---
 

@@ -63,6 +63,16 @@ type DiscordMessage = {
   };
 };
 
+interface MessageFetchDiagnostics {
+  rawCount: number;
+  filteredCount: number;
+  droppedEmpty: number;
+  droppedBot: number;
+  nonBotCount: number;
+  nonBotEmptyCount: number;
+  likelyMessageContentRestricted: boolean;
+}
+
 function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
@@ -97,9 +107,14 @@ async function editOriginalResponse(token: string, content: string): Promise<voi
   }
 }
 
-async function fetchLastMessages(channelId: string): Promise<DiscordMessage[]> {
+async function fetchLastMessages(
+  channelId: string,
+): Promise<{ messages: DiscordMessage[]; diagnostics: MessageFetchDiagnostics }> {
+  const requestUrl = `${DISCORD_API_BASE}/channels/${channelId}/messages?limit=${MESSAGE_LIMIT}`;
+  console.log(`[fetchLastMessages] channel=${channelId} limit=${MESSAGE_LIMIT}`);
+
   const res = await fetch(
-    `${DISCORD_API_BASE}/channels/${channelId}/messages?limit=${MESSAGE_LIMIT}`,
+    requestUrl,
     {
       headers: {
         Authorization: `Bot ${DISCORD_BOT_TOKEN}`,
@@ -110,18 +125,67 @@ async function fetchLastMessages(channelId: string): Promise<DiscordMessage[]> {
 
   if (!res.ok) {
     const body = await res.text();
+    console.error(`[fetchLastMessages] request failed channel=${channelId} status=${res.status} body=${body}`);
     throw new Error(`Discord message fetch failed ${res.status}: ${body}`);
   }
 
   const data = await res.json() as DiscordMessage[];
 
-  return data
-    .filter((message) => !!message.content?.trim() && !message.author?.bot)
+  console.log(`[fetchLastMessages] raw_count=${data.length} channel=${channelId}`);
+  if (data.length > 0) {
+    const sample = data.slice(0, 5).map((message) => ({
+      id: message.id,
+      author: message.author?.username ?? "unknown",
+      isBot: !!message.author?.bot,
+      contentLength: message.content?.length ?? 0,
+      hasTrimmedContent: !!message.content?.trim(),
+    }));
+    console.log("[fetchLastMessages] sample_raw_messages:", sample);
+  }
+
+  const filtered = data.filter((message) => !!message.content?.trim() && !message.author?.bot);
+  const droppedEmpty = data.filter((message) => !message.content?.trim()).length;
+  const droppedBot = data.filter((message) => !!message.author?.bot).length;
+  const nonBotMessages = data.filter((message) => !message.author?.bot);
+  const nonBotCount = nonBotMessages.length;
+  const nonBotEmptyCount = nonBotMessages.filter((message) => !message.content?.trim()).length;
+  const likelyMessageContentRestricted =
+    nonBotCount >= 5 &&
+    nonBotEmptyCount >= 5 &&
+    nonBotEmptyCount / nonBotCount >= 0.9;
+
+  console.log(
+    `[fetchLastMessages] filtered_count=${filtered.length} dropped_empty=${droppedEmpty} dropped_bot=${droppedBot} channel=${channelId}`,
+  );
+  console.log(
+    `[fetchLastMessages] non_bot_count=${nonBotCount} non_bot_empty_count=${nonBotEmptyCount} likely_message_content_restricted=${likelyMessageContentRestricted} channel=${channelId}`,
+  );
+
+  if (likelyMessageContentRestricted) {
+    console.warn(
+      `[fetchLastMessages] probable_message_content_restriction channel=${channelId}. Most non-bot messages have empty content. Enable Message Content intent and verify bot permission scopes.`,
+    );
+  }
+
+  const messages = filtered
     .reverse()
     .map((message) => ({
       ...message,
       content: sanitizeMessageContent(message.content),
     }));
+
+  return {
+    messages,
+    diagnostics: {
+      rawCount: data.length,
+      filteredCount: filtered.length,
+      droppedEmpty,
+      droppedBot,
+      nonBotCount,
+      nonBotEmptyCount,
+      likelyMessageContentRestricted,
+    },
+  };
 }
 
 interface GeminiResult {
@@ -199,7 +263,18 @@ async function processSettleThis(interaction: {
   channel_id: string;
 }): Promise<void> {
   try {
-    const messages = await fetchLastMessages(interaction.channel_id);
+    console.log(`[processSettleThis] start channel=${interaction.channel_id} token_present=${!!interaction.token}`);
+    const { messages, diagnostics } = await fetchLastMessages(interaction.channel_id);
+    console.log(`Fetched ${messages.length} messages for channel ${interaction.channel_id}`);
+    console.log("Messages:", messages.map((m) => `${m.author?.username}: ${m.content}`));
+
+    if (messages.length === 0 && diagnostics.likelyMessageContentRestricted) {
+      await editOriginalResponse(
+        interaction.token,
+        "I can see recent messages, but their text content is hidden from the bot. Please enable **Message Content Intent** for this Discord application and re-invite/update bot permissions, then try again.",
+      );
+      return;
+    }
 
     if (messages.length < 6) {
       await editOriginalResponse(

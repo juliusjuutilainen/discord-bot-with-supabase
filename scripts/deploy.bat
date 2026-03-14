@@ -137,12 +137,24 @@ if defined SECRET_JINA (
 
 :: ─── Login + link ─────────────────────────────────────────────────────────────
 echo.
-echo [info]  Logging in to Supabase...
-npx supabase@2.75.0 login
-if %errorlevel% neq 0 ( echo [error] Login failed. & pause & exit /b 1 )
+echo [info]  Checking Supabase authentication...
+call npx supabase@2.75.0 projects list >nul 2>&1
+if %errorlevel% neq 0 (
+    if defined SUPABASE_ACCESS_TOKEN (
+        echo [info]  Authenticating with SUPABASE_ACCESS_TOKEN from environment...
+        call npx supabase@2.75.0 login --token "%SUPABASE_ACCESS_TOKEN%"
+    )
+
+    call npx supabase@2.75.0 projects list >nul 2>&1
+    if %errorlevel% neq 0 (
+        echo [info]  Logging in to Supabase interactively...
+        call npx supabase@2.75.0 login
+        if %errorlevel% neq 0 ( echo [error] Login failed. & pause & exit /b 1 )
+    )
+)
 
 echo [info]  Linking project %PROJECT_REF%...
-npx supabase@2.75.0 link --project-ref %PROJECT_REF%
+call npx supabase@2.75.0 link --project-ref "%PROJECT_REF%"
 if %errorlevel% neq 0 ( echo [error] Link failed. Check your project reference. & pause & exit /b 1 )
 
 :: ─── Push secrets ─────────────────────────────────────────────────────────────
@@ -179,7 +191,7 @@ if not "%SECRET_JINA%"=="" (
 )
 
 if %SECRETS_COUNT% gtr 0 (
-    %SECRETS_CMD%
+    call %SECRETS_CMD%
     if %errorlevel% neq 0 ( echo [warn]  Secrets push failed. Set them manually in the Supabase dashboard. )
     echo [ok]    Secrets pushed: %SECRETS_COUNT% secret(s^)
 ) else (
@@ -196,7 +208,7 @@ echo.
 set FAILED_FUNCTIONS=
 
 echo [info]  Deploying discord-interactions...
-npx supabase@2.75.0 functions deploy discord-interactions --no-verify-jwt
+call npx supabase@2.75.0 functions deploy discord-interactions --no-verify-jwt
 if %errorlevel% neq 0 (
     echo [warn]  discord-interactions failed
     set FAILED_FUNCTIONS=!FAILED_FUNCTIONS! discord-interactions
@@ -205,7 +217,7 @@ if %errorlevel% neq 0 (
 )
 
 echo [info]  Deploying grounded-llm-inference...
-npx supabase@2.75.0 functions deploy grounded-llm-inference --no-verify-jwt
+call npx supabase@2.75.0 functions deploy grounded-llm-inference --no-verify-jwt
 if %errorlevel% neq 0 (
     echo [warn]  grounded-llm-inference failed
     set FAILED_FUNCTIONS=!FAILED_FUNCTIONS! grounded-llm-inference
@@ -214,7 +226,7 @@ if %errorlevel% neq 0 (
 )
 
 echo [info]  Deploying openrouter-llm-inference...
-npx supabase@2.75.0 functions deploy openrouter-llm-inference --no-verify-jwt
+call npx supabase@2.75.0 functions deploy openrouter-llm-inference --no-verify-jwt
 if %errorlevel% neq 0 (
     echo [warn]  openrouter-llm-inference failed
     set FAILED_FUNCTIONS=!FAILED_FUNCTIONS! openrouter-llm-inference
@@ -223,7 +235,7 @@ if %errorlevel% neq 0 (
 )
 
 echo [info]  Deploying gemini-grounded-llm-inference...
-npx supabase@2.75.0 functions deploy gemini-grounded-llm-inference --no-verify-jwt
+call npx supabase@2.75.0 functions deploy gemini-grounded-llm-inference --no-verify-jwt
 if %errorlevel% neq 0 (
     echo [warn]  gemini-grounded-llm-inference failed
     set FAILED_FUNCTIONS=!FAILED_FUNCTIONS! gemini-grounded-llm-inference
@@ -232,7 +244,7 @@ if %errorlevel% neq 0 (
 )
 
 echo [info]  Deploying settle-this...
-npx supabase@2.75.0 functions deploy settle-this --no-verify-jwt
+call npx supabase@2.75.0 functions deploy settle-this --no-verify-jwt
 if %errorlevel% neq 0 (
     echo [warn]  settle-this failed
     set FAILED_FUNCTIONS=!FAILED_FUNCTIONS! settle-this

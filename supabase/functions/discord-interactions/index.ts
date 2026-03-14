@@ -21,8 +21,10 @@ Deno.serve(async (req) => {
 
     const commandToFunction: Record<string, string> = {
       //commands go here
-      ask: "grounded-llm-inference",
+      ask: "gemini-grounded-llm-inference",
       openrouter: "openrouter-llm-inference",
+      settlethis: "settle-this", 
+      "ask-openrouter": "grounded-llm-inference",
     };
 
     const fnName = commandToFunction[command];

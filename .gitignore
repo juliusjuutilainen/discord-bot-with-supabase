@@ -1,1 +1,4 @@
 supabase/.temp
+.vscode
+.DS_Store
+.env

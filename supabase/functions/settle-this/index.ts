@@ -111,7 +111,7 @@ async function fetchLastMessages(
   channelId: string,
 ): Promise<{ messages: DiscordMessage[]; diagnostics: MessageFetchDiagnostics }> {
   const requestUrl = `${DISCORD_API_BASE}/channels/${channelId}/messages?limit=${MESSAGE_LIMIT}`;
-  console.log(`[fetchLastMessages] channel=${channelId} limit=${MESSAGE_LIMIT}`);
+  console.log(`[fetchLastMessages] fetching recent messages (limit=${MESSAGE_LIMIT})`);
 
   const res = await fetch(
     requestUrl,
@@ -124,24 +124,13 @@ async function fetchLastMessages(
   );
 
   if (!res.ok) {
-    const body = await res.text();
-    console.error(`[fetchLastMessages] request failed channel=${channelId} status=${res.status} body=${body}`);
-    throw new Error(`Discord message fetch failed ${res.status}: ${body}`);
+    console.error(`[fetchLastMessages] request failed status=${res.status}`);
+    throw new Error(`Discord message fetch failed ${res.status}`);
   }
 
   const data = await res.json() as DiscordMessage[];
 
-  console.log(`[fetchLastMessages] raw_count=${data.length} channel=${channelId}`);
-  if (data.length > 0) {
-    const sample = data.slice(0, 5).map((message) => ({
-      id: message.id,
-      author: message.author?.username ?? "unknown",
-      isBot: !!message.author?.bot,
-      contentLength: message.content?.length ?? 0,
-      hasTrimmedContent: !!message.content?.trim(),
-    }));
-    console.log("[fetchLastMessages] sample_raw_messages:", sample);
-  }
+  console.log(`[fetchLastMessages] raw_count=${data.length}`);
 
   const filtered = data.filter((message) => !!message.content?.trim() && !message.author?.bot);
   const droppedEmpty = data.filter((message) => !message.content?.trim()).length;
@@ -155,15 +144,15 @@ async function fetchLastMessages(
     nonBotEmptyCount / nonBotCount >= 0.9;
 
   console.log(
-    `[fetchLastMessages] filtered_count=${filtered.length} dropped_empty=${droppedEmpty} dropped_bot=${droppedBot} channel=${channelId}`,
+    `[fetchLastMessages] filtered_count=${filtered.length} dropped_empty=${droppedEmpty} dropped_bot=${droppedBot}`,
   );
   console.log(
-    `[fetchLastMessages] non_bot_count=${nonBotCount} non_bot_empty_count=${nonBotEmptyCount} likely_message_content_restricted=${likelyMessageContentRestricted} channel=${channelId}`,
+    `[fetchLastMessages] non_bot_count=${nonBotCount} non_bot_empty_count=${nonBotEmptyCount} likely_message_content_restricted=${likelyMessageContentRestricted}`,
   );
 
   if (likelyMessageContentRestricted) {
     console.warn(
-      `[fetchLastMessages] probable_message_content_restriction channel=${channelId}. Most non-bot messages have empty content. Enable Message Content intent and verify bot permission scopes.`,
+      "[fetchLastMessages] probable_message_content_restriction. Most non-bot messages have empty content. Enable Message Content intent and verify bot permission scopes.",
     );
   }
 
@@ -263,10 +252,9 @@ async function processSettleThis(interaction: {
   channel_id: string;
 }): Promise<void> {
   try {
-    console.log(`[processSettleThis] start channel=${interaction.channel_id} token_present=${!!interaction.token}`);
+    console.log(`[processSettleThis] start token_present=${!!interaction.token}`);
     const { messages, diagnostics } = await fetchLastMessages(interaction.channel_id);
-    console.log(`Fetched ${messages.length} messages for channel ${interaction.channel_id}`);
-    console.log("Messages:", messages.map((m) => `${m.author?.username}: ${m.content}`));
+    console.log(`Fetched ${messages.length} messages`);
 
     if (messages.length === 0 && diagnostics.likelyMessageContentRestricted) {
       await editOriginalResponse(
